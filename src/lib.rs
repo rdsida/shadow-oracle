@@ -62,6 +62,7 @@ use litesvm::LiteSVM;
 /// Main entry point for shadow oracles
 ///
 /// Provides access to all oracle providers through a single interface.
+#[allow(dead_code)]
 pub struct ShadowOracle<'a> {
     svm: &'a mut LiteSVM,
 }
