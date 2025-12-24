@@ -6,6 +6,7 @@
 use crate::{PriceConf, ShadowOracleError, StandardFeeds};
 use litesvm::LiteSVM;
 use solana_account::Account;
+use solana_clock::Clock;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -29,31 +30,23 @@ struct ChainlinkFeed {
 }
 
 impl ChainlinkFeed {
-    fn from_conf(conf: &PriceConf) -> Self {
-        let now = conf.publish_time.unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64
-        });
+    fn from_conf(conf: &PriceConf, clock: &Clock) -> Self {
+        let now = conf.publish_time.unwrap_or(clock.unix_timestamp);
 
         Self {
             price: conf.price_usd(),
             decimals: conf.decimals,
-            slot: 1000,
+            slot: clock.slot,
             timestamp: now as u32,
             round_id: 1,
         }
     }
 
-    fn set_price(&mut self, price: f64) {
+    fn set_price(&mut self, price: f64, clock: &Clock) {
         self.price = price;
-        self.slot += 1;
+        self.slot = clock.slot;
         self.round_id += 1;
-        self.timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as u32;
+        self.timestamp = clock.unix_timestamp as u32;
     }
 
     fn get_answer(&self) -> i128 {
@@ -153,7 +146,8 @@ impl<'a> Chainlink<'a> {
         let keypair = Keypair::new();
         let pubkey = keypair.pubkey();
 
-        let feed = ChainlinkFeed::from_conf(&conf);
+        let clock = self.svm.get_sysvar::<Clock>();
+        let feed = ChainlinkFeed::from_conf(&conf, &clock);
         self.set_account(&pubkey, &feed);
         self.price_feeds.insert(pubkey, feed);
 
@@ -162,7 +156,8 @@ impl<'a> Chainlink<'a> {
 
     /// Create a price feed at a specific address
     pub fn create_price_feed_at(&mut self, address: Pubkey, conf: PriceConf) -> Pubkey {
-        let feed = ChainlinkFeed::from_conf(&conf);
+        let clock = self.svm.get_sysvar::<Clock>();
+        let feed = ChainlinkFeed::from_conf(&conf, &clock);
         self.set_account(&address, &feed);
         self.price_feeds.insert(address, feed);
         address
@@ -170,12 +165,13 @@ impl<'a> Chainlink<'a> {
 
     /// Update the price of an existing feed
     pub fn set_price(&mut self, feed: &Pubkey, price: f64) -> Result<(), ShadowOracleError> {
+        let clock = self.svm.get_sysvar::<Clock>();
         let account = self
             .price_feeds
             .get_mut(feed)
             .ok_or_else(|| ShadowOracleError::PriceFeedNotFound(feed.to_string()))?;
 
-        account.set_price(price);
+        account.set_price(price, &clock);
         let account_clone = account.clone();
         self.set_account(feed, &account_clone);
         Ok(())
@@ -274,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_create_price_feed() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut cl = Chainlink::new(&mut svm);
 
         let feed = cl.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -285,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_update_price() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut cl = Chainlink::new(&mut svm);
 
         let feed = cl.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -297,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_round_increment() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut cl = Chainlink::new(&mut svm);
 
         let feed = cl.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -312,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_standard_feeds() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut cl = Chainlink::new(&mut svm);
 
         let feeds = cl.create_standard_feeds();
@@ -326,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_simulate_crash() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut cl = Chainlink::new(&mut svm);
 
         let feed = cl.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -338,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_decimals() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut cl = Chainlink::new(&mut svm);
 
         let conf = PriceConf::new_usd(100.0, 0.1).with_decimals(6);

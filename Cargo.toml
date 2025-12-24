@@ -2,18 +2,20 @@
 name = "shadow-oracle"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75.0"
 description = "Mock oracles for LiteSVM testing - Pyth, Switchboard, and Chainlink price feeds"
 license = "MIT"
-repository = "https://github.com/edge-protocol/shadow-oracle"
+repository = "https://github.com/rdsida/shadow-oracle"
 keywords = ["solana", "oracle", "pyth", "switchboard", "chainlink", "litesvm", "testing"]
 categories = ["development-tools::testing", "cryptography::cryptocurrencies"]
 
 [dependencies]
-litesvm = { git = "https://github.com/LiteSVM/litesvm", tag = "v0.8.2" }
+litesvm = "0.8"
 solana-pubkey = "3.0"
 solana-account = "3.0"
 solana-keypair = "3.0"
 solana-signer = "3.0"
+solana-clock = "3.0"
 bytemuck = { version = "1.14", features = ["derive"] }
 thiserror = "1.0"
 

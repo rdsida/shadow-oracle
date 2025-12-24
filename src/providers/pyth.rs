@@ -6,6 +6,7 @@ use crate::{PriceConf, PriceStatus, ShadowOracleError, StandardFeeds};
 use bytemuck::{Pod, Zeroable};
 use litesvm::LiteSVM;
 use solana_account::Account;
+use solana_clock::Clock;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -66,13 +67,9 @@ struct PythPriceAccount {
 impl PythPriceAccount {
     const SIZE: usize = std::mem::size_of::<Self>();
 
-    fn from_conf(conf: &PriceConf) -> Self {
-        let now = conf.publish_time.unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64
-        });
+    fn from_conf(conf: &PriceConf, clock: &Clock) -> Self {
+        let now = conf.publish_time.unwrap_or(clock.unix_timestamp);
+        let slot = clock.slot;
 
         Self {
             magic: PYTH_MAGIC,
@@ -83,8 +80,8 @@ impl PythPriceAccount {
             expo: conf.expo,
             num: 1,
             num_qt: 1,
-            last_slot: 1000,
-            valid_slot: 1000,
+            last_slot: slot,
+            valid_slot: slot,
             ema_price: conf.ema_price.unwrap_or(conf.price),
             ema_conf: conf.ema_conf.unwrap_or(conf.conf),
             timestamp: now,
@@ -94,7 +91,7 @@ impl PythPriceAccount {
             drv4: 0,
             prod: [0u8; 32],
             next: [0u8; 32],
-            prev_slot: 999,
+            prev_slot: slot.saturating_sub(1),
             prev_price: conf.price,
             prev_conf: conf.conf,
             prev_timestamp: now - 1,
@@ -103,12 +100,12 @@ impl PythPriceAccount {
                 conf: conf.conf,
                 status: pyth_status(conf.status),
                 corp_act: 0,
-                pub_slot: 1000,
+                pub_slot: slot,
             },
         }
     }
 
-    fn set_price(&mut self, price: i64, conf: u64) {
+    fn set_price(&mut self, price: i64, conf: u64, clock: &Clock) {
         self.prev_price = self.agg.price;
         self.prev_conf = self.agg.conf;
         self.prev_timestamp = self.timestamp;
@@ -116,14 +113,10 @@ impl PythPriceAccount {
 
         self.agg.price = price;
         self.agg.conf = conf;
-        self.last_slot += 1;
-        self.valid_slot = self.last_slot;
-        self.agg.pub_slot = self.last_slot;
-
-        self.timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        self.last_slot = clock.slot;
+        self.valid_slot = clock.slot;
+        self.agg.pub_slot = clock.slot;
+        self.timestamp = clock.unix_timestamp;
 
         self.ema_price = (self.ema_price * 9 + price) / 10;
         self.ema_conf = (self.ema_conf * 9 + conf) / 10;
@@ -133,7 +126,7 @@ impl PythPriceAccount {
         self.agg.status = pyth_status(status);
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    fn as_bytes(&self) -> Vec<u8> {
         bytemuck::bytes_of(self).to_vec()
     }
 }
@@ -178,7 +171,8 @@ impl<'a> Pyth<'a> {
         let keypair = Keypair::new();
         let pubkey = keypair.pubkey();
 
-        let price_account = PythPriceAccount::from_conf(&conf);
+        let clock = self.svm.get_sysvar::<Clock>();
+        let price_account = PythPriceAccount::from_conf(&conf, &clock);
         self.set_account(&pubkey, &price_account);
         self.price_feeds.insert(pubkey, price_account);
 
@@ -187,7 +181,8 @@ impl<'a> Pyth<'a> {
 
     /// Create a price feed at a specific address
     pub fn create_price_feed_at(&mut self, address: Pubkey, conf: PriceConf) -> Pubkey {
-        let price_account = PythPriceAccount::from_conf(&conf);
+        let clock = self.svm.get_sysvar::<Clock>();
+        let price_account = PythPriceAccount::from_conf(&conf, &clock);
         self.set_account(&address, &price_account);
         self.price_feeds.insert(address, price_account);
         address
@@ -200,12 +195,13 @@ impl<'a> Pyth<'a> {
         price: i64,
         conf: u64,
     ) -> Result<(), ShadowOracleError> {
+        let clock = self.svm.get_sysvar::<Clock>();
         let account = self
             .price_feeds
             .get_mut(feed)
             .ok_or_else(|| ShadowOracleError::PriceFeedNotFound(feed.to_string()))?;
 
-        account.set_price(price, conf);
+        account.set_price(price, conf, &clock);
         let account_copy = *account;
         self.set_account(feed, &account_copy);
         Ok(())
@@ -291,7 +287,7 @@ impl<'a> Pyth<'a> {
     }
 
     fn set_account(&mut self, pubkey: &Pubkey, account: &PythPriceAccount) {
-        let data = account.to_bytes();
+        let data = account.as_bytes();
 
         self.svm
             .set_account(
@@ -314,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_create_price_feed() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut pyth = Pyth::new(&mut svm);
 
         let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -326,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_update_price() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut pyth = Pyth::new(&mut svm);
 
         let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -338,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_standard_feeds() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut pyth = Pyth::new(&mut svm);
 
         let feeds = pyth.create_standard_feeds();
@@ -352,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_simulate_crash() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut pyth = Pyth::new(&mut svm);
 
         let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
@@ -364,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_simulate_depeg() {
-        let mut svm = LiteSVM::default();
+        let mut svm = LiteSVM::new().with_sysvars();
         let mut pyth = Pyth::new(&mut svm);
 
         let feed = pyth.create_price_feed(PriceConf::stablecoin());
