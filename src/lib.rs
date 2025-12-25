@@ -5,38 +5,32 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
+//! ```rust
 //! use litesvm::LiteSVM;
-//! use shadow_oracle::{ShadowOracle, PriceConf};
+//! use shadow_oracle::{Pyth, Switchboard, Chainlink, PriceConf};
 //!
-//! let mut svm = LiteSVM::default();
-//! let mut oracle = ShadowOracle::new(&mut svm);
+//! let mut svm = LiteSVM::new().with_sysvars();
 //!
 //! // Create a Pyth price feed at $100
-//! let sol_feed = oracle.pyth().create_price_feed(PriceConf::new_usd(100.0, 0.1));
-//!
-//! // Create a Switchboard feed
-//! let btc_feed = oracle.switchboard().create_price_feed(PriceConf::new_usd(43000.0, 10.0));
-//!
-//! // Create a Chainlink feed
-//! let eth_feed = oracle.chainlink().create_price_feed(PriceConf::new_usd(2200.0, 1.0));
+//! let mut pyth = Pyth::new(&mut svm);
+//! let sol_feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
 //!
 //! // Update prices
-//! oracle.pyth().set_price_usd(&sol_feed, 150.0, 0.2).unwrap();
+//! pyth.set_price_usd(&sol_feed, 150.0, 0.2).unwrap();
 //!
 //! // Simulate market events
-//! oracle.pyth().simulate_crash(&sol_feed, 50.0).unwrap();
+//! pyth.simulate_crash(&sol_feed, 50.0).unwrap();
 //! ```
 //!
 //! ## Individual Providers
 //!
 //! You can also use providers directly:
 //!
-//! ```rust,ignore
+//! ```rust
 //! use litesvm::LiteSVM;
-//! use shadow_oracle::{Pyth, Switchboard, Chainlink, PriceConf};
+//! use shadow_oracle::{Pyth, PriceConf};
 //!
-//! let mut svm = LiteSVM::default();
+//! let mut svm = LiteSVM::new().with_sysvars();
 //! let mut pyth = Pyth::new(&mut svm);
 //! let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
 //! ```

@@ -2,7 +2,7 @@
 name = "shadow-oracle"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.86.0"
 description = "Mock oracles for LiteSVM testing - Pyth, Switchboard, and Chainlink price feeds"
 license = "MIT"
 repository = "https://github.com/rdsida/shadow-oracle"
