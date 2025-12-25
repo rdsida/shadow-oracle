@@ -21,9 +21,3 @@ thiserror = "1.0"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
-
-[features]
-default = ["pyth", "switchboard", "chainlink"]
-pyth = []
-switchboard = []
-chainlink = []

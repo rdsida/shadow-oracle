@@ -47,22 +47,15 @@ pub mod providers;
 
 pub use error::*;
 pub use price::*;
-
-#[cfg(feature = "pyth")]
-pub use providers::pyth::Pyth;
-
-#[cfg(feature = "switchboard")]
-pub use providers::switchboard::Switchboard;
-
-#[cfg(feature = "chainlink")]
 pub use providers::chainlink::Chainlink;
+pub use providers::pyth::Pyth;
+pub use providers::switchboard::Switchboard;
 
 use litesvm::LiteSVM;
 
 /// Main entry point for shadow oracles
 ///
 /// Provides access to all oracle providers through a single interface.
-#[allow(dead_code)]
 pub struct ShadowOracle<'a> {
     svm: &'a mut LiteSVM,
 }
@@ -74,19 +67,16 @@ impl<'a> ShadowOracle<'a> {
     }
 
     /// Get a Pyth oracle provider
-    #[cfg(feature = "pyth")]
     pub fn pyth(&mut self) -> Pyth<'_> {
         Pyth::new(self.svm)
     }
 
     /// Get a Switchboard oracle provider
-    #[cfg(feature = "switchboard")]
     pub fn switchboard(&mut self) -> Switchboard<'_> {
         Switchboard::new(self.svm)
     }
 
     /// Get a Chainlink oracle provider
-    #[cfg(feature = "chainlink")]
     pub fn chainlink(&mut self) -> Chainlink<'_> {
         Chainlink::new(self.svm)
     }

@@ -11,21 +11,6 @@ Add to your `Cargo.toml`:
 shadow-oracle = "0.1"
 ```
 
-### Feature Flags
-
-All oracle providers are enabled by default. To use only specific providers:
-
-```toml
-[dev-dependencies]
-shadow-oracle = { version = "0.1", default-features = false, features = ["pyth"] }
-```
-
-Available features:
-
-- `pyth` - Pyth Network oracle
-- `switchboard` - Switchboard V2 oracle
-- `chainlink` - Chainlink oracle
-
 ## Quick Start
 
 ```rust
