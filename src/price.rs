@@ -98,6 +98,28 @@ impl PriceConf {
         self
     }
 
+    /// Set an explicit publish time
+    pub fn with_publish_time(mut self, timestamp: i64) -> Self {
+        self.publish_time = Some(timestamp);
+        self
+    }
+
+    /// Mark this price as stale by a given number of seconds relative to a reference time
+    ///
+    /// # Example
+    /// ```rust
+    /// use shadow_oracle::PriceConf;
+    ///
+    /// let current_time = 1_700_000_000i64;
+    /// let stale_conf = PriceConf::new_usd(100.0, 0.1)
+    ///     .stale_by(300, current_time); // 5 minutes old
+    /// assert_eq!(stale_conf.publish_time, Some(current_time - 300));
+    /// ```
+    pub fn stale_by(mut self, seconds_ago: i64, reference_time: i64) -> Self {
+        self.publish_time = Some(reference_time - seconds_ago);
+        self
+    }
+
     /// Get price as f64 USD value
     pub fn price_usd(&self) -> f64 {
         let scale = 10f64.powi(self.expo.abs());
@@ -144,5 +166,18 @@ mod tests {
     fn test_stablecoin() {
         let conf = PriceConf::stablecoin();
         assert!((conf.price_usd() - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_with_publish_time() {
+        let conf = PriceConf::new_usd(100.0, 0.1).with_publish_time(1000);
+        assert_eq!(conf.publish_time, Some(1000));
+    }
+
+    #[test]
+    fn test_stale_by() {
+        let reference_time = 1000i64;
+        let conf = PriceConf::new_usd(100.0, 0.1).stale_by(300, reference_time);
+        assert_eq!(conf.publish_time, Some(700)); // 1000 - 300
     }
 }

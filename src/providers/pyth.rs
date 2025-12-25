@@ -250,6 +250,36 @@ impl<'a> Pyth<'a> {
         })
     }
 
+    /// Get the timestamp of the last price update
+    pub fn get_timestamp(&self, feed: &Pubkey) -> Option<i64> {
+        self.price_feeds.get(feed).map(|a| a.timestamp)
+    }
+
+    /// Get the slot of the last price update
+    pub fn get_slot(&self, feed: &Pubkey) -> Option<u64> {
+        self.price_feeds.get(feed).map(|a| a.last_slot)
+    }
+
+    /// Make an existing feed stale by setting its timestamp to `seconds_ago` in the past
+    ///
+    /// This is useful for testing staleness checks without changing the price.
+    pub fn make_stale(&mut self, feed: &Pubkey, seconds_ago: i64) -> Result<(), ShadowOracleError> {
+        let clock = self.svm.get_sysvar::<Clock>();
+        let stale_timestamp = clock.unix_timestamp - seconds_ago;
+
+        let account = self
+            .price_feeds
+            .get_mut(feed)
+            .ok_or_else(|| ShadowOracleError::PriceFeedNotFound(feed.to_string()))?;
+
+        account.timestamp = stale_timestamp;
+        account.prev_timestamp = stale_timestamp - 1;
+
+        let account_copy = *account;
+        self.set_account(feed, &account_copy);
+        Ok(())
+    }
+
     /// Create standard price feeds for common assets
     pub fn create_standard_feeds(&mut self) -> StandardFeeds {
         StandardFeeds {
@@ -368,5 +398,67 @@ mod tests {
 
         let (price, _) = pyth.get_price_usd(&feed).unwrap();
         assert!((price - 0.95).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_timestamp_uses_svm_clock() {
+        let mut svm = LiteSVM::new().with_sysvars();
+
+        let initial_clock = svm.get_sysvar::<Clock>();
+        let initial_timestamp = initial_clock.unix_timestamp;
+
+        let mut pyth = Pyth::new(&mut svm);
+        let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
+
+        let feed_timestamp = pyth.get_timestamp(&feed).unwrap();
+        assert_eq!(feed_timestamp, initial_timestamp);
+    }
+
+    #[test]
+    fn test_slot_uses_svm_clock() {
+        let mut svm = LiteSVM::new().with_sysvars();
+
+        let initial_clock = svm.get_sysvar::<Clock>();
+        let initial_slot = initial_clock.slot;
+
+        let mut pyth = Pyth::new(&mut svm);
+        let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
+
+        let feed_slot = pyth.get_slot(&feed).unwrap();
+        assert_eq!(feed_slot, initial_slot);
+    }
+
+    #[test]
+    fn test_make_stale() {
+        let mut svm = LiteSVM::new().with_sysvars();
+
+        let clock = svm.get_sysvar::<Clock>();
+        let current_time = clock.unix_timestamp;
+
+        let mut pyth = Pyth::new(&mut svm);
+        let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
+
+        // Make the feed 5 minutes stale
+        pyth.make_stale(&feed, 300).unwrap();
+
+        let feed_timestamp = pyth.get_timestamp(&feed).unwrap();
+        assert_eq!(feed_timestamp, current_time - 300);
+    }
+
+    #[test]
+    fn test_create_stale_feed_with_stale_by() {
+        let mut svm = LiteSVM::new().with_sysvars();
+
+        let clock = svm.get_sysvar::<Clock>();
+        let current_time = clock.unix_timestamp;
+
+        let mut pyth = Pyth::new(&mut svm);
+
+        // Create a feed that's already 5 minutes old
+        let stale_conf = PriceConf::new_usd(100.0, 0.1).stale_by(300, current_time);
+        let feed = pyth.create_price_feed(stale_conf);
+
+        let feed_timestamp = pyth.get_timestamp(&feed).unwrap();
+        assert_eq!(feed_timestamp, current_time - 300);
     }
 }

@@ -1,8 +1,8 @@
 [package]
 name = "shadow-oracle"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.86.0"
 description = "Mock oracles for LiteSVM testing - Pyth, Switchboard, and Chainlink price feeds"
 license = "MIT"
 repository = "https://github.com/rdsida/shadow-oracle"
@@ -21,9 +21,3 @@ thiserror = "1.0"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
-
-[features]
-default = ["pyth", "switchboard", "chainlink"]
-pyth = []
-switchboard = []
-chainlink = []

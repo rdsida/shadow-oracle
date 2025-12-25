@@ -11,21 +11,6 @@ Add to your `Cargo.toml`:
 shadow-oracle = "0.1"
 ```
 
-### Feature Flags
-
-All oracle providers are enabled by default. To use only specific providers:
-
-```toml
-[dev-dependencies]
-shadow-oracle = { version = "0.1", default-features = false, features = ["pyth"] }
-```
-
-Available features:
-
-- `pyth` - Pyth Network oracle
-- `switchboard` - Switchboard V2 oracle
-- `chainlink` - Chainlink oracle
-
 ## Quick Start
 
 ```rust
@@ -380,7 +365,11 @@ fn test_with_mainnet_addresses() {
 
 ### Testing Price Staleness
 
-Oracle timestamps are tied to LiteSVM's Clock sysvar. When you warp time forward, oracle prices become stale without needing to update them. This allows testing staleness checks in your program.
+There are two ways to test staleness:
+
+#### Option 1: Create a stale feed with `PriceConf::stale_by()`
+
+Create a feed that's already stale at creation time:
 
 ```rust
 use solana_clock::Clock;
@@ -388,12 +377,66 @@ use solana_clock::Clock;
 #[test]
 fn test_stale_price_rejected() {
     let mut svm = LiteSVM::new().with_sysvars();
-    let mut oracle = ShadowOracle::new(&mut svm);
 
-    // Create a fresh price feed (timestamp = current clock time)
-    let feed = oracle.pyth().create_price_feed(PriceConf::new_usd(100.0, 0.1));
+    let clock = svm.get_sysvar::<Clock>();
+    let current_time = clock.unix_timestamp;
+
+    let mut pyth = Pyth::new(&mut svm);
+
+    // Create a feed that's already 5 minutes old
+    let stale_conf = PriceConf::new_usd(100.0, 0.1)
+        .stale_by(300, current_time);
+    let feed = pyth.create_price_feed(stale_conf);
+
+    // Your program's staleness check should reject this
+    // ... execute your program, expect failure ...
+}
+```
+
+#### Option 2: Make an existing feed stale with `make_stale()`
+
+Create a fresh feed, then make it stale later:
+
+```rust
+#[test]
+fn test_price_becomes_stale() {
+    let mut svm = LiteSVM::new().with_sysvars();
+    let mut pyth = Pyth::new(&mut svm);
+
+    // Create a fresh price feed
+    let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
 
     // Price is fresh, transaction succeeds
+    // ... execute your program ...
+
+    // Make the feed 5 minutes stale (without changing the price)
+    pyth.make_stale(&feed, 300).unwrap();
+
+    // Now the oracle price is 5 minutes old
+    // Your program's staleness check should reject this
+    // ... execute your program, expect failure ...
+}
+```
+
+#### Option 3: Warp LiteSVM time forward
+
+Move the clock forward so existing feeds become stale. Note that you must keep the same provider instance or use `make_stale()` after warping since provider instances don't persist their feed registry across instantiation:
+
+```rust
+use solana_clock::Clock;
+
+#[test]
+fn test_time_warp_staleness() {
+    let mut svm = LiteSVM::new().with_sysvars();
+
+    // Create the feed first
+    let feed = {
+        let mut pyth = Pyth::new(&mut svm);
+        pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1))
+    };
+
+    // The feed account exists in SVM with the original timestamp
+    // Your program reads the feed - price is fresh
     // ... execute your program ...
 
     // Warp time forward by 1 hour (3600 seconds)
@@ -401,38 +444,65 @@ fn test_stale_price_rejected() {
     clock.unix_timestamp += 3600;
     svm.set_sysvar(&clock);
 
-    // Now the oracle price is 1 hour old
-    // Your program's staleness check should reject this
+    // Now the oracle price is 1 hour old relative to the new clock
+    // Your program reads the same feed account - staleness check should reject
     // ... execute your program, expect failure ...
 }
+```
 
+The feed account in LiteSVM retains its original timestamp, so when your program reads it after the time warp, it will appear stale.
+
+#### Reading timestamps and slots
+
+All providers expose methods to check the feed's timestamp and slot:
+
+```rust
+// Get the timestamp of the last price update
+let timestamp = pyth.get_timestamp(&feed).unwrap();
+
+// Get the slot of the last price update
+let slot = pyth.get_slot(&feed).unwrap();
+
+// Same methods available on Switchboard and Chainlink
+let timestamp = switchboard.get_timestamp(&feed).unwrap();
+let slot = chainlink.get_slot(&feed).unwrap();
+```
+
+#### Refreshing a stale price
+
+Updating the price refreshes the timestamp to the current clock time:
+
+```rust
 #[test]
 fn test_refresh_stale_price() {
     let mut svm = LiteSVM::new().with_sysvars();
-    let mut oracle = ShadowOracle::new(&mut svm);
+    let mut pyth = Pyth::new(&mut svm);
 
-    let feed = oracle.pyth().create_price_feed(PriceConf::new_usd(100.0, 0.1));
+    let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
 
-    // Warp time forward
-    let mut clock = svm.get_sysvar::<Clock>();
-    clock.unix_timestamp += 3600;
-    svm.set_sysvar(&clock);
+    // Make it stale
+    pyth.make_stale(&feed, 3600).unwrap();
 
     // Price is now stale...
 
     // Update the price - this refreshes the timestamp to current clock time
-    oracle.pyth().set_price_usd(&feed, 100.0, 0.1).unwrap();
+    pyth.set_price_usd(&feed, 100.0, 0.1).unwrap();
 
     // Price is fresh again, transaction succeeds
-    // ... execute your program ...
 }
+```
 
+#### Slot-based staleness
+
+Some programs check staleness by slot rather than timestamp:
+
+```rust
 #[test]
 fn test_slot_based_staleness() {
     let mut svm = LiteSVM::new().with_sysvars();
-    let mut oracle = ShadowOracle::new(&mut svm);
+    let mut pyth = Pyth::new(&mut svm);
 
-    let feed = oracle.pyth().create_price_feed(PriceConf::new_usd(100.0, 0.1));
+    let feed = pyth.create_price_feed(PriceConf::new_usd(100.0, 0.1));
 
     // Warp to a much later slot
     svm.warp_to_slot(1_000_000);
@@ -441,7 +511,7 @@ fn test_slot_based_staleness() {
     // Programs checking slot-based staleness will reject this price
 
     // Update price to refresh both timestamp and slot
-    oracle.pyth().set_price_usd(&feed, 100.0, 0.1).unwrap();
+    pyth.set_price_usd(&feed, 100.0, 0.1).unwrap();
 }
 ```
 
