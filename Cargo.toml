@@ -1,6 +1,6 @@
 [package]
 name = "shadow-oracle"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.85.0"
 description = "Mock oracles for LiteSVM testing - Pyth, Switchboard, and Chainlink price feeds"
