@@ -8,7 +8,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-shadow-oracle = "0.1"
+shadow-oracle = "1.0"
 ```
 
 ## Quick Start
